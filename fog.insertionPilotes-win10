@@ -1,0 +1,66 @@
+#!/bin/bash
+# insertion des pilotes dans c:\windows\drivers.
+#
+# Author: cfleury Version: 1.5 ajout gestion nvme
+
+. /usr/share/fog/lib/funcs.sh
+
+if [ "$osid" = "9" ]; then
+        # -------- Windows 10 --------
+	# Recherche la partition contenant windows
+	cf_partition=$(grep "Basic data" "/images/$img/d1.partitions" | grep -v "RequiredPartition" | cut -d' ' -f1)
+
+	if [[ -n $cf_partition ]]; then
+		# si la recheche de partition est ok, Monte le disque
+		echo "(Pilotes_W10) Monte la partition $cf_partition..."
+		mkdir /ntfs 2>/dev/null
+		mount.ntfs-3g "${cf_partition}" /ntfs 2>/tmp/mntfail
+		mntRet="$?"
+	else
+		echo "(Pilotes_W10) Erreur: partition C non trouvee pour l'image $img";
+		mntRet="0"
+	fi
+
+	if [ ! "$mntRet" = "0" ]; then
+	        # cf2019-09 Remplace sda par nvme0n1p pour un disque NVME.
+		cf_partition=/dev/nvme0n1p${cf_partition: -1}
+		echo "(Pilotes_W10) Monte la partition $cf_partition..."
+		mount.ntfs-3g "${cf_partition}" /ntfs 2>/tmp/mntfail
+		mntRet="$?"
+	fi
+
+	# Verifie que le disque est monté.
+        if [ ! "$mntRet" = "0" ]; then
+		echo "(Pilotes_W10) Erreur: impossible de monter la partition C depuis ${cf_partition}";
+		sleep 60; # pause 1min pour voir l'erreur
+	else
+		echo "(Pilotes_W10) le disque est bien monté..."
+
+	        # Renomme si besoin le dossier Drivers avec al bonne casse.
+	        if [ -d "/ntfs/Windows/drivers" ]; then mv /ntfs/Windows/drivers /ntfs/Windows/Drivers; fi;
+
+		# Recupere le modele de station depuis le bios
+	        sysproduct=$(dmidecode -s system-product-name)
+
+		if [[ -n $sysproduct ]]; then # si le modele n'est pas vide
+
+			if [ ! -f "/images/drivers/$sysproduct.tar.gz" ]; then # si le fichier n'est pas present
+				echo "(Pilotes_W10) Erreur: le package de pilotes $sysproduct.tar.gz n'existe pas sur le serveur."
+				touch "/ntfs/Windows/Drivers/$sysproduct.unavailable"
+				sleep 60; # pause 1min pour voir l'erreur
+			else
+				# copie les drivers sur le poste
+				echo "(Pilotes_W10) Decompression du package de pilotes $sysproduct.tar.gz..."
+				gunzip -c "/images/drivers/$sysproduct.tar.gz" | tar xf - -C /ntfs/Windows/Drivers/
+			fi
+	        else
+			echo "(Pilotes_W10) Erreur: Modele non reconnu dans le bios"
+			touch "/ntfs/Windows/Drivers/sysproduct.undetected"
+			sleep 60; # pause 1min pour voir l'erreur
+        	fi
+	fi
+fi
+
+# pour Verification...
+#read -p "(Pilotes_W10) Fin. Appuyer sur une touche pour continuer...";
+
